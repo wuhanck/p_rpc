@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import logging
 from asyncio import CancelledError, TimeoutError
 from functools import wraps
@@ -8,7 +7,7 @@ import traceback
 import aioredis
 import bson
 
-from arun import append_task, append_cleanup, run, new_future, sleep, post_in_task, timeout
+from arun import append_task, append_cleanup, run, future, sleep, post_in_task, timeout
 
 from .arque import Arque
 
@@ -83,7 +82,7 @@ async def _release_queue_task(bus, remote_name, task_id):
 
 
 def _get_future():
-    return new_future()
+    return future()
 
 
 def call_remote(func):
