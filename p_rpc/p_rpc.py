@@ -4,81 +4,20 @@ from asyncio import CancelledError, TimeoutError
 from functools import wraps
 import traceback
 
-import aioredis
-import bson
+import mspspec
 
 from arun import append_task, append_cleanup, run, future, sleep, post_in_task, timeout
 
-from .arque import Arque
+from .arque import arque
 
 
 _logger = logging.getLogger(__name__)
 _call_remote = {}
 _serve_remote = {}
-_enqueue_timeout = 300
-_dequeue_timeout = 300
-_release_queue_task_timeout = 120
-_sweep_timeout = 120
-_get_stats_timeout = 120
 
 
 async def _cleanup(bus):
     pass
-
-
-async def _redis_pool(bus):
-    _redis_conf = bus._redis_conf
-    address = (_redis_conf.host, _redis_conf.port)
-    return await aioredis.create_redis_pool(address, db=_redis_conf.db, password=_redis_conf.password, encoding=None)
-
-
-async def _put_redis(bus, redis):
-    redis.close()
-    await redis.wait_closed()
-
-
-async def _call_enqueue(bus, remote_name, task, task_id):
-    redis = None
-    while True:
-        try:
-            async with timeout(_enqueue_timeout):
-                redis = await _redis_pool(bus)
-                await Arque.enqueue(redis, remote_name, task, task_id)
-                return
-        except CancelledError as e:
-            _logger.warning(f'redis enqueue cancelled {repr(e)}')
-            raise e
-        except TimeoutError:
-            _logger.info(f'redis enqueue timeout-retry')
-        except Exception as e:
-            _logger.warning(f'redis enqueue error-retry {repr(e)}')
-            await sleep(1)
-        finally:
-            if redis is not None:
-                await _put_redis(bus, redis)
-                redis = None
-
-
-async def _release_queue_task(bus, remote_name, task_id):
-    redis = None
-    while True:
-        try:
-            async with timeout(_release_queue_task_timeout):
-                redis = await _redis_pool(bus)
-                await Arque.release(redis, remote_name, task_id)
-                return
-        except CancelledError as e:
-            _logger.warning(f'queue release task cancelled {repr(e)}')
-            raise e
-        except TimeoutError:
-            _logger.info(f'queue release task timeout-retry')
-        except Exception as e:
-            _logger.warning(f'queue release task error-retry {repr(e)}')
-            await sleep(1)
-        finally:
-            if redis is not None:
-                await _put_redis(bus, redis)
-                redis = None
 
 
 def _get_future():
@@ -167,32 +106,6 @@ def serve_remote(func):
     return wrapped
 
 
-def _with_redis_pool(func):
-    @wraps(func)
-    async def wrapped(bus):
-        redis = None
-        while True:
-            try:
-                redis = await _redis_pool(bus)
-                await func(bus, redis)
-                return
-            except CancelledError as e:
-                _logger.warning(f'with-redis-pool cancelled {repr(e)}')
-                raise e
-            except TimeoutError:
-                _logger.info(f'with-redis-pool timeout-retry')
-            except Exception as e:
-                _logger.warning(f'with-redis-pool error-retry {repr(e)}')
-                await sleep(1)
-            finally:
-                if redis is not None:
-                    await _put_redis(bus, redis)
-                    redis = None
-
-    return wrapped
-
-
-@_with_redis_pool
 async def _consume_task(bus, redis):
     _logger.info('Starting consuming...')
     queue = Arque(redis, bus._local_name)
@@ -227,37 +140,12 @@ async def _consume_task(bus, redis):
         post_in_task(_do_consume_task(bus, task_id, task_data))
 
 
-@_with_redis_pool
-async def _sweep_task(bus, redis):
-    _logger.info('Starting sweeping...')
-    queue = Arque(redis, bus._local_name)
-    while True:
-        async with timeout(_sweep_timeout):
-            await queue.sweep()
-        await sleep(_sweep_timeout)
-
-
-@_with_redis_pool
-async def _stats_task(bus, redis):
-    _logger.info('Starting stats...')
-    queue = Arque(redis, bus._local_name)
-    while True:
-        async with timeout(_get_stats_timeout):
-            stats = await queue.get_stats()
-            _logger.info(stats)
-        await sleep(_get_stats_timeout)
-
-
-def init(name, redis_conf, max_limits=3):
+def init(bus, name):
     class _bus:
         _local_name = name
         _redis_conf = redis_conf
 
-    for _ in range(max_limits):
-        append_task(_consume_task(_bus))
-    append_task(_sweep_task(_bus))
-    append_task(_stats_task(_bus))
-
+    append_task(_consume_task(_bus))
     append_cleanup(_cleanup(_bus))
     return _bus
 

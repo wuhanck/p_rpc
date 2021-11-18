@@ -1,4 +1,3 @@
 # p_rpc
-use arque(https://github.com/code-impactor/arque.git) as backend.
-use bson as encoder
+# under XP
 peer to peer rpc
