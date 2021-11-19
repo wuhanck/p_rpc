@@ -17,19 +17,23 @@ def _csock(cname):
 
 def arque(bus_name, self_name, dequeue_cb):
     def _cname(peer_name):
-        return '\0'+bus_name+'\0'+peer_name
+        return '\0local\0'+bus_name+'\0'+peer_name
+
     lock_ = asyncio.Lock()
     cname_ = _cname(self_name)
     sock_ = _csock(cname_)
     sock_.listen()
-    chans_ = {}
+    ichans_ = {}
+    tchans_ = {}
 
     async def _serv_msg(msg):
-        print(f'msg len: {len(msg)}')
-        if (dequeue_cb is not None):
+        try:
+            print(f'len:{len(msg)}')
             await dequeue_cb(msg)
+        except:
+            pass
 
-    async def _serv_recv(sock, peer_name):
+    async def _serv_recv(sock, chans, peer_name):
         loop = arun.loop()
         try:
             while (True):
@@ -38,45 +42,46 @@ def arque(bus_name, self_name, dequeue_cb):
                     break
                 await _serv_msg(msg)
         finally:
-            chans_.pop(peer_name, None)
+            chans.pop(peer_name, None)
             sock.close()
 
     async def _handshake(sock, peer_name):
         loop = arun.loop()
         popchan = False
         closesock = True
+        chans = tchans_
         try:
             if (peer_name is None): # as target
                 peer_name = await loop.sock_recv(sock, MAX_MSG)
-                peer_name = peer_name.decode()
-                print(f'target peer_name: {peer_name}')
-                if (len(peer_name) == 0 or chans_.get(peer_name, None) is not None):
+                if (len(peer_name) == 0):
                     return
-                chans_[peer_name] = sock
+                peer_name = peer_name.decode()
+                if (chans.get(peer_name, None) is not None):
+                    return
+                chans[peer_name] = sock
                 popchan = True
-                print(f'target self_name: {self_name}')
                 await loop.sock_sendall(sock, self_name.encode())
                 popchan = False
                 closesock = False
 
             else: # as iniator
+                chans = ichans_
                 await loop.sock_sendall(sock, self_name.encode())
-                print(f'iniator self: {self_name}')
                 check_name = await loop.sock_recv(sock, MAX_MSG)
+                if (len(check_name) == 0):
+                    return
                 check_name = check_name.decode()
-                print(f'iniator check_name: {check_name}')
-                print(f'iniator peer_name: {peer_name}')
                 if (check_name != peer_name):
                     return
-                assert(chans_.get(peer_name, None) is None)
-                chans_[peer_name] = sock
+                assert(chans.get(peer_name, None) is None)
+                chans[peer_name] = sock
                 closesock = False
 
-            arun.post_in_task(_serv_recv(sock, peer_name))
+            arun.post_in_task(_serv_recv(sock, chans, peer_name))
 
         finally:
             if (popchan):
-                chans_.pop(peer_name, None)
+                chans.pop(peer_name, None)
             if (closesock):
                 sock.close()
 
@@ -91,13 +96,11 @@ def arque(bus_name, self_name, dequeue_cb):
     arun.append_task(_serv_accept())
 
     async def _enqueue(peer_name, msg):
-        if (peer_name == self_name):
-            await _serv_msg(msg)
-            return
-
         loop = arun.loop()
         async with lock_:
-            sock = chans_.get(peer_name, None)
+            sock = tchans_.get(peer_name, None)
+            if (sock is None):
+                sock = ichans_.get(peer_name, None)
             if (sock is None):
                 sock = _csock(None)
                 await loop.sock_connect(sock, _cname(peer_name))
@@ -116,6 +119,8 @@ if __name__ == '__main__':
     chan2 = arque('test', 'test1', None)
 
     msg = bytearray(MAX_MSG)
+    bs = bytearray()
+    bs.decode()
 
     async def _test_self(idx):
         print(idx)
