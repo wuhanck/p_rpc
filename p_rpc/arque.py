@@ -66,6 +66,7 @@ def arque(bus_name, self_name, dequeue_cb):
 
             else: # as iniator
                 chans = ichans_
+                await loop.sock_connect(sock, _cname(peer_name))
                 await loop.sock_sendall(sock, self_name.encode())
                 check_name = await loop.sock_recv(sock, MAX_MSG)
                 if (len(check_name) == 0):
@@ -103,7 +104,6 @@ def arque(bus_name, self_name, dequeue_cb):
                 sock = ichans_.get(peer_name, None)
             if (sock is None):
                 sock = _csock(None)
-                await loop.sock_connect(sock, _cname(peer_name))
                 await _handshake(sock, peer_name)
         await loop.sock_sendall(sock, msg)
 
