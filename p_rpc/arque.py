@@ -30,7 +30,7 @@ async def _caccept(sock):
     return ret
 
 
-def arque(bus_name, self_name, msg_cb):
+def arque(bus_name, self_name):
     _lname = partial(_cname, 'local', bus_name)
     _lsock = partial(_csock, _lname(self_name))
     _tsock = partial(_csock, None)
@@ -40,6 +40,11 @@ def arque(bus_name, self_name, msg_cb):
     ichans_ = {}
     ilocks_ = {}
     tchans_ = {}
+    msg_cb_ = None
+
+    def _cb(msg_cb):
+        nonlocal msg_cb_
+        msg_cb_ = msg_cb
 
     async def _serv_recv(sock, chans, peer_name):
         loop = arun.loop()
@@ -48,9 +53,9 @@ def arque(bus_name, self_name, msg_cb):
                 msg = await loop.sock_recv(sock, MAX_MSG)
                 if len(msg) == 0:
                     break
-                print(f'{bus_name}, {self_name}, {peer_name}, {len(msg)}')
                 with suppress(Exception):
-                    await msg_cb(peer_name, msg)
+                    if msg_cb_ is not None:
+                        await msg_cb_(peer_name, msg)
         finally:
             chans.pop(peer_name, None)
             sock.close()
@@ -110,6 +115,7 @@ def arque(bus_name, self_name, msg_cb):
         await loop.sock_sendall(sock, msg)
 
     class inner:
+        cb = _cb
         enqueue = _enqueue
         max_msg = MAX_MSG
 
@@ -117,8 +123,13 @@ def arque(bus_name, self_name, msg_cb):
 
 
 if __name__ == '__main__':
-    chan1 = arque('test', 'ty', None)
-    chan2 = arque('test', 'test1', None)
+    chan1 = arque('test', 'ty')
+    chan2 = arque('test', 'test1')
+
+    def print_msg(peer_name, msg):
+        print(f'{peer_name} msg-len: {len(msg)}')
+
+    chan1.cb(print_msg)
 
     msg = bytearray(MAX_MSG)
     bs = bytearray()
