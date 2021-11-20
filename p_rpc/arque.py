@@ -69,7 +69,7 @@ def arque(bus_name, self_name, msg_cb):
         except Exception:
             sock.close()
 
-    async def _iniator_handshake(peer_name):
+    async def _initiator_handshake(peer_name):
         idx = hash(peer_name) % LOCKS_NUM
         lock = ilocks_.get(idx, None)
         if (lock is None):
@@ -104,7 +104,7 @@ def arque(bus_name, self_name, msg_cb):
         if (sock is None):
             sock = ichans_.get(peer_name, None)
         if (sock is None):
-            sock = await _iniator_handshake(peer_name)
+            sock = await _initiator_handshake(peer_name)
         if (sock is None):
             raise Exception(f'unreachable peer: {peer_name}')
         await loop.sock_sendall(sock, msg)
