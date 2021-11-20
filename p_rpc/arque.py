@@ -54,44 +54,41 @@ def arque(bus_name, self_name, msg_cb):
             chans.pop(peer_name, None)
             sock.close()
 
-    async def _handshake(sock, peer_name):
+    async def _target_handshake(sock):
         loop = arun.loop()
-        popchan = False
-        closesock = True
-        chans = tchans_
         try:
-            if (peer_name is None): # as target
-                peer_name = await loop.sock_recv(sock, MAX_MSG)
-                if (len(peer_name) == 0):
-                    return
-                peer_name = peer_name.decode()
-                if (chans.get(peer_name, None) is not None):
-                    return
-                chans[peer_name] = sock
-                closesock = False
+            peer_name = await loop.sock_recv(sock, MAX_MSG)
+            if (len(peer_name) == 0):
+                raise Exception('sock shutdown')
+            peer_name = peer_name.decode()
+            if (tchans_.get(peer_name, None) is not None):
+                raise Exception('chan already exit')
+            tchans_[peer_name] = sock
+            arun.post_in_task(_serv_recv(sock, tchans_, peer_name))
+        except Exception:
+            sock.close()
 
-            else: # as iniator
-                chans = ichans_
+    async def _iniator_handshake(peer_name):
+        loop = arun.loop()
+        async with lock_:
+            sock = ichans_.get(peer_name, None)
+            if (sock is not None):
+                return sock
+            sock = _tsock()
+            try:
                 await loop.sock_connect(sock, _lname(peer_name))
                 await loop.sock_sendall(sock, self_name.encode())
-                assert(chans.get(peer_name, None) is None)
-                chans[peer_name] = sock
-                closesock = False
-
-            arun.post_in_task(_serv_recv(sock, chans, peer_name))
-
-        finally:
-            if (popchan):
-                chans.pop(peer_name, None)
-            if (closesock):
+                ichans_[peer_name] = sock
+                arun.post_in_task(_serv_recv(sock, ichans_, peer_name))
+                return sock
+            except Exception:
                 sock.close()
-
 
     async def _serv_accept():
         _laccept = partial(_caccept, sock_)
         while (True):
             sock = await _laccept()
-            arun.post_in_task(_handshake(sock, None))
+            arun.post_in_task(_target_handshake(sock))
 
     arun.append_task(_serv_accept())
 
@@ -99,11 +96,9 @@ def arque(bus_name, self_name, msg_cb):
         loop = arun.loop()
         sock = tchans_.get(peer_name, None)
         if (sock is None):
-            async with lock_:
-                sock = ichans_.get(peer_name, None)
-                if (sock is None):
-                    sock = _tsock()
-                    await _handshake(sock, peer_name)
+            sock = ichans_.get(peer_name, None)
+        if (sock is None):
+            sock = await _iniator_handshake(peer_name)
         await loop.sock_sendall(sock, msg)
 
     class inner:
