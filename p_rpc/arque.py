@@ -8,6 +8,11 @@ import arun
 
 
 MAX_MSG = 130*1024
+LOCKS_NUM = 64
+
+
+def _cname(prefix, bus_name, peer_name):
+    return '\0'+prefix+'\0'+bus_name+'\0'+peer_name
 
 
 def _csock(cname):
@@ -16,10 +21,6 @@ def _csock(cname):
         sock.bind(cname)
     sock.setblocking(False)
     return sock
-
-
-def _cname(prefix, bus_name, peer_name):
-    return '\0'+prefix+'\0'+bus_name+'\0'+peer_name
 
 
 async def _caccept(sock):
@@ -34,10 +35,10 @@ def arque(bus_name, self_name, msg_cb):
     _lsock = partial(_csock, _lname(self_name))
     _tsock = partial(_csock, None)
 
-    lock_ = asyncio.Lock()
     sock_ = _lsock()
     sock_.listen()
     ichans_ = {}
+    ilocks_ = {}
     tchans_ = {}
 
     async def _serv_recv(sock, chans, peer_name):
@@ -69,8 +70,13 @@ def arque(bus_name, self_name, msg_cb):
             sock.close()
 
     async def _iniator_handshake(peer_name):
+        idx = hash(peer_name) % LOCKS_NUM
+        lock = ilocks_.get(idx, None)
+        if (lock is None):
+            lock = asyncio.Lock()
+            ilocks_[idx] = lock
         loop = arun.loop()
-        async with lock_:
+        async with lock:
             sock = ichans_.get(peer_name, None)
             if (sock is not None):
                 return sock
@@ -99,6 +105,8 @@ def arque(bus_name, self_name, msg_cb):
             sock = ichans_.get(peer_name, None)
         if (sock is None):
             sock = await _iniator_handshake(peer_name)
+        if (sock is None):
+            raise Exception(f'unreachable peer: {peer_name}')
         await loop.sock_sendall(sock, msg)
 
     class inner:
