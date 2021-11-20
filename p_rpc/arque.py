@@ -44,6 +44,7 @@ def arque(bus_name, self_name):
 
     def _cb(msg_cb):
         nonlocal msg_cb_
+        assert(asyncio.iscoroutinefunction(msg_cb))
         msg_cb_ = msg_cb
 
     async def _serv_recv(sock, chans, peer_name):
@@ -53,9 +54,8 @@ def arque(bus_name, self_name):
                 msg = await loop.sock_recv(sock, MAX_MSG)
                 if len(msg) == 0:
                     break
-                with suppress(Exception):
-                    if msg_cb_ is not None:
-                        await msg_cb_(peer_name, msg)
+                if (msg_cb_ is not None):
+                    arun.post_in_task(msg_cb_(peer_name, msg))
         finally:
             chans.pop(peer_name, None)
             sock.close()
@@ -126,7 +126,7 @@ if __name__ == '__main__':
     chan1 = arque('test', 'ty')
     chan2 = arque('test', 'test1')
 
-    def print_msg(peer_name, msg):
+    async def print_msg(peer_name, msg):
         print(f'{peer_name} msg-len: {len(msg)}')
 
     chan1.cb(print_msg)
