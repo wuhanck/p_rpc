@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import socket
-
 import asyncio
+from functools import partial
+from contextlib import suppress
 
 import arun
+
 
 MAX_MSG = 130*1024
 
@@ -15,23 +17,28 @@ def _csock(cname):
     sock.setblocking(False)
     return sock
 
-def arque(bus_name, self_name, dequeue_cb):
-    def _cname(peer_name):
-        return '\0local\0'+bus_name+'\0'+peer_name
+
+def _cname(prefix, bus_name, peer_name):
+    return '\0'+prefix+'\0'+bus_name+'\0'+peer_name
+
+
+async def _caccept(sock):
+    loop = arun.loop()
+    ret, _ = await loop.sock_accept(sock)
+    ret.setblocking(False)
+    return ret
+
+
+def arque(bus_name, self_name, msg_cb):
+    _lname = partial(_cname, 'local', bus_name)
+    _lsock = partial(_csock, _lname(self_name))
+    _tsock = partial(_csock, None)
 
     lock_ = asyncio.Lock()
-    cname_ = _cname(self_name)
-    sock_ = _csock(cname_)
+    sock_ = _lsock()
     sock_.listen()
     ichans_ = {}
     tchans_ = {}
-
-    async def _serv_msg(msg):
-        try:
-            print(f'len:{len(msg)}')
-            await dequeue_cb(msg)
-        except:
-            pass
 
     async def _serv_recv(sock, chans, peer_name):
         loop = arun.loop()
@@ -40,7 +47,9 @@ def arque(bus_name, self_name, dequeue_cb):
                 msg = await loop.sock_recv(sock, MAX_MSG)
                 if len(msg) == 0:
                     break
-                await _serv_msg(msg)
+                print(f'{bus_name}, {self_name}, {peer_name}, {len(msg)}')
+                with suppress(Exception):
+                    await msg_cb(peer_name, msg)
         finally:
             chans.pop(peer_name, None)
             sock.close()
@@ -59,21 +68,12 @@ def arque(bus_name, self_name, dequeue_cb):
                 if (chans.get(peer_name, None) is not None):
                     return
                 chans[peer_name] = sock
-                popchan = True
-                await loop.sock_sendall(sock, self_name.encode())
-                popchan = False
                 closesock = False
 
             else: # as iniator
                 chans = ichans_
-                await loop.sock_connect(sock, _cname(peer_name))
+                await loop.sock_connect(sock, _lname(peer_name))
                 await loop.sock_sendall(sock, self_name.encode())
-                check_name = await loop.sock_recv(sock, MAX_MSG)
-                if (len(check_name) == 0):
-                    return
-                check_name = check_name.decode()
-                if (check_name != peer_name):
-                    return
                 assert(chans.get(peer_name, None) is None)
                 chans[peer_name] = sock
                 closesock = False
@@ -88,23 +88,22 @@ def arque(bus_name, self_name, dequeue_cb):
 
 
     async def _serv_accept():
-        loop = arun.loop()
+        _laccept = partial(_caccept, sock_)
         while (True):
-            sock, _ = await loop.sock_accept(sock_)
-            sock.setblocking(False)
+            sock = await _laccept()
             arun.post_in_task(_handshake(sock, None))
 
     arun.append_task(_serv_accept())
 
     async def _enqueue(peer_name, msg):
         loop = arun.loop()
-        async with lock_:
-            sock = tchans_.get(peer_name, None)
-            if (sock is None):
+        sock = tchans_.get(peer_name, None)
+        if (sock is None):
+            async with lock_:
                 sock = ichans_.get(peer_name, None)
-            if (sock is None):
-                sock = _csock(None)
-                await _handshake(sock, peer_name)
+                if (sock is None):
+                    sock = _tsock()
+                    await _handshake(sock, peer_name)
         await loop.sock_sendall(sock, msg)
 
     class inner:
