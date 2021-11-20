@@ -1,171 +1,103 @@
 #!/usr/bin/env python3
 import logging
-from asyncio import CancelledError, TimeoutError
-from functools import wraps
+from asyncio import CancelledError, iscoroutinefunction
 import traceback
 
-import mspspec
+from msgspec.core import decode, encode
 
-from arun import append_task, append_cleanup, run, future, sleep, post_in_task, timeout
+from arun import future
 
 from .arque import arque
 
+MAX_SERV_ID = (0x1 << 48)
 
-_logger = logging.getLogger(__name__)
-_call_remote = {}
-_serve_remote = {}
-
-
-async def _cleanup(bus):
-    pass
+TASK_TYPE_CALL = 0
+TASK_TYPE_RET = 1
 
 
-def _get_future():
-    return future()
+def init(bus_name, self_name):
+    logger_ = logging.getLogger(f'{__name__}.{bus_name}.{self_name}')
+    call_ = {}
+    serv_ = {}
+    serv_id_ = 0
+    chan_ = arque(bus_name, self_name)
 
+    def _gen_id():
+        nonlocal serv_id_
+        serv_id_ += 1
+        if (serv_id_ == MAX_SERV_ID):
+            serv_id_ = 0
+        return serv_id_
 
-def call_remote(func):
-    @wraps(func)
-    async def wrapped(bus, remote_name, *args, **kwargs):
-        await func(bus, remote_name, *args, **kwargs)  # Just check param or you can inspect in func
-        wait_ret = _get_future()
-        task_id = None
-        ret = None
+    def _reg_serv(func):
+        assert(iscoroutinefunction(func))
+        fname = func.__name__
+        if (serv_.get(fname, None) is not None):
+            raise Exception(f'serv {fname} registered')
+        serv_[fname] = func
+
+    async def _call(peer_name, fname, *args, **kwargs):
+        wait_ret = future()
+        task_id = _gen_id()
         try:
-            task = {'call': func.__name__,
-                    'from': bus._local_name,
-                    'args': args,
-                    'kwargs': kwargs}
-            _logger.debug(f'submit task {task}')
-            task = bson.dumps(task)
-            task_id = Arque.gen_task_id()
-            _call_remote[task_id] = wait_ret
-            await _call_enqueue(bus, remote_name, task, task_id)
-            ret = await wait_ret
-            if 'e' in ret:
-                e = ret['e']
-                _logger.info(f'call remote {func.__name__} error {e}')
-                raise Exception(e)
-            return (*ret['t'], ) if 't' in ret else ret['d']
+            task = [TASK_TYPE_CALL, task_id, fname, args, kwargs]
+            logger_.debug(f'submit task {task}')
+            task = encode(task)
+            call_[task_id] = wait_ret
+            await chan_.enqueue(peer_name, task)
+            ok, ret = await wait_ret
+            if (not ok):
+                logger_.info(f'call remote {fname} error {ret}')
+                raise Exception(ret)
+            return ret
         finally:
-            _call_remote.pop(task_id, None)
+            call_.pop(task_id, None)
 
-    return wrapped
-
-
-async def _process(bus, task_id, task_data):
-    ret = None
-    job = None
-    try:
-        job = bson.loads(task_data)
-    except Exception as e:
-        _logger.warning(f'drop. task-data error {repr(e)}')
-        return
-
-    _logger.debug(f'Starting process {job}')
-    if 'call' in job:
-        call_from = None
+    async def _process(peer_name, task_data):
         try:
-            call_from = job['from']
-            call_name = job['call']
-            args = job['args']
-            kwargs = job['kwargs']
-            ret = await _serve_remote[call_name](bus, call_from, *args, **kwargs)
-            ret = {'t': ret, 'call-id': task_id} if type(ret) is tuple else {'d': ret, 'call-id': task_id}
-            ret = bson.dumps(ret)
-        except CancelledError as e:
-            _logger.warning(f'_process task {task_id} call-from {call_from} cancelled')
-            call_from = None
-            raise e
+            job = decode(task_data)
+            task_type, task_id, *val = job
         except Exception as e:
-            _logger.debug(f'procss call-id {task_id} error. trace {traceback.format_exc()}')
-            ret = {'e': repr(e), 'call-id': task_id}
-            ret = bson.dumps(ret)
-        finally:
-            if call_from is not None:
-                await _call_enqueue(bus, call_from, ret, Arque.gen_task_id())
-    else:
-        try:
-            task_id = job['call-id']
-            wait_ret = _call_remote.pop(task_id, None)
-            if wait_ret is not None:
-                wait_ret.set_result(job)
-        except CancelledError as e:
-            _logger.warning(f'_process {task_id} (maybe returned) cancelled')
-            raise e
-        except Exception as e:
-            _logger.info(f'drop. job error {repr(e)}')
+            logger_.warning(f'drop task-data from {peer_name}. error {repr(e)}')
+            return
 
-
-def serve_remote(func):
-    _serve_remote[func.__name__] = func
-    @wraps(func)
-    def wrapped():
-        assert('@serve_remote func' == 'not callable directly')
-
-    return wrapped
-
-
-async def _consume_task(bus, redis):
-    _logger.info('Starting consuming...')
-    queue = Arque(redis, bus._local_name)
-    while True:
-        task_id = None
-        task_data = None
-        async with timeout(_dequeue_timeout):
-            task_id, task_data = await queue.dequeue(_dequeue_timeout//3)
-
-        if task_id is None:
-            continue
-
-        if task_id == '__not_found__':
-            _logger.debug(f'TASK ID: {task_id}')
-            continue
-
-        if task_id == '__overloaded__':
-            _logger.info(f'TASK ID: {task_id}')
-            await sleep(1)
-            continue
-
-        if task_id == '__marked_as_failed___':
-            _logger.info(f'TASK  ID: {task_id}')
-            continue
-
-        async def _do_consume_task(bus, task_id, task_data):
+        logger_.debug(f'Starting process {job}')
+        if (task_type == TASK_TYPE_CALL):
             try:
-                await _process(bus, task_id, task_data)
-            finally:
-                await _release_queue_task(bus, bus._local_name, task_id)
+                fname, args, kwargs = val
+                ret = await serv_[fname](chan_, peer_name, *args, **kwargs)
+                ret = [TASK_TYPE_RET, task_id, False, ret]
+                ret = encode(ret)
+            except CancelledError as e:
+                logger_.warning(f'_process task {task_id} call-from {peer_name} cancelled')
+                raise
+            except Exception as e:
+                logger_.debug(f'procss call-id {task_id} error. trace {traceback.format_exc()}')
+                ret = [TASK_TYPE_RET, task_id, False, repr(e)]
+                ret = encode(ret)
+            await chan_.enqueue(peer_name, ret)
+        elif (task_type == TASK_TYPE_RET):
+            try:
+                ok, ret = val
+                wait_ret = call_.pop(task_id, None)
+                if wait_ret is not None:
+                    wait_ret.set_result(ok, ret)
+            except CancelledError as e:
+                logger_.warning(f'_process {task_id} (maybe returned) cancelled')
+                raise
+            except Exception as e:
+                logger_.info(f'drop. job error {repr(e)}')
+        else:
+            logger_.warning(f'_process {task_id} unknown type {task_type}')
 
-        post_in_task(_do_consume_task(bus, task_id, task_data))
+        chan_.cb(_process)
 
+        class inner:
+            reg_serv = _reg_serv
+            call = _call
 
-def init(bus, name):
-    class _bus:
-        _local_name = name
-        _redis_conf = redis_conf
-
-    append_task(_consume_task(_bus))
-    append_cleanup(_cleanup(_bus))
-    return _bus
+        return inner
 
 
 if __name__ == '__main__':
-    @serve_remote
-    async def test():
-        pass
-    # test()
-
-    @call_remote
-    async def test_call(remote_name):
-        pass
-
-    bus = init('kiwi', {'host': '127.0.0.1',
-                  'port': 6379,
-                  'password': '123456',
-                  'db': 1})
-
-    append_task(test_call(bus, 'orange'))
-    print(_serve_remote)
-    print(_call_remote)
-    run()
+    pass
