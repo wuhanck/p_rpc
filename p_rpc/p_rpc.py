@@ -56,6 +56,10 @@ def init(bus_name, self_name):
         finally:
             call_.pop(tag, None)
 
+    class inner_:
+        reg_serv = _reg_serv
+        call = _call
+
     async def _process(peer_name, req):
         try:
             req = decode(req)
@@ -68,7 +72,7 @@ def init(bus_name, self_name):
         if (reqt == _REQT_CALL):
             try:
                 serv_name, args, kwargs = rest
-                ret = await serv_[serv_name](chan_, peer_name, *args, **kwargs)
+                ret = await serv_[serv_name](inner_, peer_name, *args, **kwargs)
                 ret = [_REQT_RET_DONE, tag, ret]
                 ret = encode(ret)
             except CancelledError as e:
@@ -109,13 +113,9 @@ def init(bus_name, self_name):
         else:
             logger_.warning(f'_process {tag} unknown type {reqt}')
 
-        chan_.cb(_process)
+    chan_.cb(_process)
 
-        class inner:
-            reg_serv = _reg_serv
-            call = _call
-
-        return inner
+    return inner_
 
 
 if __name__ == '__main__':
