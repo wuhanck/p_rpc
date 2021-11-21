@@ -9,86 +9,105 @@ from arun import future
 
 from .arque import arque
 
-MAX_SERV_ID = (0x1 << 48)
 
-TASK_TYPE_CALL = 0
-TASK_TYPE_RET = 1
+_MAX_SERV_ID = (0x1 << 48)
+_REQT_CALL = 0
+_REQT_RET_DONE = 1
+_REQT_RET_ERR = 2
+_REQT_NOTIFY = -1
 
 
 def init(bus_name, self_name):
     logger_ = logging.getLogger(f'{__name__}.{bus_name}.{self_name}')
     call_ = {}
     serv_ = {}
-    serv_id_ = 0
+    serv_tag_ = 0
     chan_ = arque(bus_name, self_name)
 
-    def _gen_id():
-        nonlocal serv_id_
-        serv_id_ += 1
-        if (serv_id_ == MAX_SERV_ID):
-            serv_id_ = 0
-        return serv_id_
+    def _gen_tag():
+        nonlocal serv_tag_
+        serv_tag_ += 1
+        if (serv_tag_ == _MAX_SERV_ID):
+            serv_tag_ = 0
+        return serv_tag_
 
-    def _reg_serv(func):
-        assert(iscoroutinefunction(func))
-        fname = func.__name__
-        if (serv_.get(fname, None) is not None):
-            raise Exception(f'serv {fname} registered')
-        serv_[fname] = func
+    def _reg_serv(serv_func, serv_name=None):
+        assert(iscoroutinefunction(serv_func))
+        if (serv_name is None):
+            serv_name = serv_func.__name__
+        if (serv_.get(serv_name, None) is not None):
+            raise Exception(f'serv {serv_name} registered')
+        serv_[serv_name] = serv_func
 
-    async def _call(peer_name, fname, *args, **kwargs):
+    async def _call(peer_name, serv_name, *args, **kwargs):
         wait_ret = future()
-        task_id = _gen_id()
+        tag = _gen_tag()
         try:
-            task = [TASK_TYPE_CALL, task_id, fname, args, kwargs]
-            logger_.debug(f'submit task {task}')
-            task = encode(task)
-            call_[task_id] = wait_ret
-            await chan_.enqueue(peer_name, task)
+            req = [_REQT_CALL, tag, serv_name, args, kwargs]
+            logger_.debug(f'submit req {req}')
+            req = encode(req)
+            call_[tag] = wait_ret
+            await chan_.enqueue(peer_name, req)
             ok, ret = await wait_ret
             if (not ok):
-                logger_.info(f'call remote {fname} error {ret}')
+                logger_.info(f'call remote {serv_name} error {ret}')
                 raise Exception(ret)
             return ret
         finally:
-            call_.pop(task_id, None)
+            call_.pop(tag, None)
 
-    async def _process(peer_name, task_data):
+    async def _process(peer_name, req):
         try:
-            job = decode(task_data)
-            task_type, task_id, *val = job
+            req = decode(req)
+            reqt, tag, *rest = req
         except Exception as e:
-            logger_.warning(f'drop task-data from {peer_name}. error {repr(e)}')
+            logger_.warning(f'drop req from {peer_name}. error {repr(e)}')
             return
 
-        logger_.debug(f'Starting process {job}')
-        if (task_type == TASK_TYPE_CALL):
+        logger_.debug(f'Starting _process {req}')
+        if (reqt == _REQT_CALL):
             try:
-                fname, args, kwargs = val
-                ret = await serv_[fname](chan_, peer_name, *args, **kwargs)
-                ret = [TASK_TYPE_RET, task_id, False, ret]
+                serv_name, args, kwargs = rest
+                ret = await serv_[serv_name](chan_, peer_name, *args, **kwargs)
+                ret = [_REQT_RET_DONE, tag, ret]
                 ret = encode(ret)
             except CancelledError as e:
-                logger_.warning(f'_process task {task_id} call-from {peer_name} cancelled')
+                logger_.warning(f'_process req {tag} call-from {peer_name} cancelled')
                 raise
             except Exception as e:
-                logger_.debug(f'procss call-id {task_id} error. trace {traceback.format_exc()}')
-                ret = [TASK_TYPE_RET, task_id, False, repr(e)]
+                logger_.debug(f'_procss req {tag} error. trace {traceback.format_exc()}')
+                ret = [_REQT_RET_ERR, tag, repr(e)]
                 ret = encode(ret)
             await chan_.enqueue(peer_name, ret)
-        elif (task_type == TASK_TYPE_RET):
+
+        elif (reqt == _REQT_RET_DONE):
             try:
-                ok, ret = val
-                wait_ret = call_.pop(task_id, None)
+                res, = rest
+                wait_ret = call_.pop(tag, None)
                 if wait_ret is not None:
-                    wait_ret.set_result(ok, ret)
+                    wait_ret.set_result(True, res)
             except CancelledError as e:
-                logger_.warning(f'_process {task_id} (maybe returned) cancelled')
+                logger_.warning(f'_process {tag} (maybe returned) cancelled')
                 raise
             except Exception as e:
-                logger_.info(f'drop. job error {repr(e)}')
+                logger_.info(f'drop. req error {repr(e)}')
+
+        elif (reqt == _REQT_RET_ERR):
+            try:
+                err, = rest
+                wait_ret = call_.pop(tag, None)
+                if wait_ret is not None:
+                    wait_ret.set_result(False, err)
+            except CancelledError as e:
+                logger_.warning(f'_process {tag} (maybe returned) cancelled')
+                raise
+            except Exception as e:
+                logger_.info(f'drop. req error {repr(e)}')
+
+        elif (reqt == _REQT_NOTIFY):
+            pass
         else:
-            logger_.warning(f'_process {task_id} unknown type {task_type}')
+            logger_.warning(f'_process {tag} unknown type {reqt}')
 
         chan_.cb(_process)
 
