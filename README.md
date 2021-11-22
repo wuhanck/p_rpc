@@ -1,3 +1,2 @@
 # p_rpc
-# under XP
-peer to peer rpc
+a very simple local peer to peer rpc
