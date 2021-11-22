@@ -5,7 +5,7 @@ import traceback
 
 from msgspec.core import decode, encode
 
-from arun import future
+import arun
 
 import p_chan
 
@@ -40,7 +40,7 @@ def init(bus_name, self_name):
         serv_[serv_name] = serv_func
 
     async def _call(peer_name, serv_name, *args, **kwargs):
-        wait_ret = future()
+        wait_ret = arun.future()
         tag = _gen_tag()
         try:
             req = [_REQT_CALL, tag, serv_name, args, kwargs]
@@ -48,10 +48,7 @@ def init(bus_name, self_name):
             req = encode(req)
             call_[tag] = wait_ret
             await chan_.enqueue(peer_name, req)
-            ok, ret = await wait_ret
-            if (not ok):
-                logger_.info(f'call remote {serv_name} error {ret}')
-                raise Exception(ret)
+            ret = await wait_ret
             return ret
         finally:
             call_.pop(tag, None)
@@ -90,7 +87,7 @@ def init(bus_name, self_name):
                 res, = rest
                 wait_ret = call_.pop(tag, None)
                 if wait_ret is not None:
-                    wait_ret.set_result(True, res)
+                    wait_ret.set_result(res)
             except Exception as e:
                 logger_.info(f'drop reqt-ret-done. {repr(e)}')
 
@@ -99,7 +96,7 @@ def init(bus_name, self_name):
                 err, = rest
                 wait_ret = call_.pop(tag, None)
                 if wait_ret is not None:
-                    wait_ret.set_result(False, err)
+                    wait_ret.set_exception(Exception(err))
             except Exception as e:
                 logger_.info(f'drop reqt-ret-err. {repr(e)}')
 
@@ -116,4 +113,26 @@ def init(bus_name, self_name):
 
 
 if __name__ == '__main__':
-    pass
+    async def serv1(chan, peer_name):
+        print(f'chan:{chan} from: {peer_name}. serv1 called.')
+        pass
+
+    async def serv2(chan, peer_name, err_str):
+        print(f'chan:{chan} from: {peer_name}. serv2 called.')
+        raise Exception(err_str)
+
+    peer1 = init('test-bus', 'test1')
+    peer1.reg_serv(serv1)
+    peer1.reg_serv(serv2)
+
+    peer2 = init('test-bus', 'test2')
+
+    async def _test2_call_test1_serv1():
+        ret = await peer2.call('test1', 'serv1')
+        print(f'_test2_call_test1_serv1 ret:{ret}')
+        ret = await peer2.call('test1', 'serv2', 'my fault')
+        print(f'exception happens. no print this {ret}')
+
+    arun.append_task(_test2_call_test1_serv1())
+
+    arun.run()
