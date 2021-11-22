@@ -7,7 +7,7 @@ from msgspec.core import decode, encode
 
 from arun import future
 
-from .arque import arque
+import p_chan
 
 
 _MAX_SERV_ID = (0x1 << 48)
@@ -22,7 +22,7 @@ def init(bus_name, self_name):
     call_ = {}
     serv_ = {}
     serv_tag_ = 0
-    chan_ = arque(bus_name, self_name)
+    chan_ = p_chan.chan(bus_name, self_name)
 
     def _gen_tag():
         nonlocal serv_tag_
@@ -72,14 +72,15 @@ def init(bus_name, self_name):
         if (reqt == _REQT_CALL):
             try:
                 serv_name, args, kwargs = rest
-                ret = await serv_[serv_name](inner_, peer_name, *args, **kwargs)
+                serv = serv_[serv_name]
+                ret = await serv(inner_, peer_name, *args, **kwargs)
                 ret = [_REQT_RET_DONE, tag, ret]
                 ret = encode(ret)
-            except CancelledError as e:
-                logger_.warning(f'_process req {tag} call-from {peer_name} cancelled')
+            except CancelledError:
+                logger_.warning(f'req {tag} from {peer_name} cancelled')
                 raise
             except Exception as e:
-                logger_.debug(f'_procss req {tag} error. trace {traceback.format_exc()}')
+                logger_.debug(f'req {tag} trace {traceback.format_exc()}')
                 ret = [_REQT_RET_ERR, tag, repr(e)]
                 ret = encode(ret)
             await chan_.enqueue(peer_name, ret)
@@ -90,11 +91,8 @@ def init(bus_name, self_name):
                 wait_ret = call_.pop(tag, None)
                 if wait_ret is not None:
                     wait_ret.set_result(True, res)
-            except CancelledError as e:
-                logger_.warning(f'_process {tag} (maybe returned) cancelled')
-                raise
             except Exception as e:
-                logger_.info(f'drop. req error {repr(e)}')
+                logger_.info(f'drop reqt-ret-done. {repr(e)}')
 
         elif (reqt == _REQT_RET_ERR):
             try:
@@ -102,16 +100,15 @@ def init(bus_name, self_name):
                 wait_ret = call_.pop(tag, None)
                 if wait_ret is not None:
                     wait_ret.set_result(False, err)
-            except CancelledError as e:
-                logger_.warning(f'_process {tag} (maybe returned) cancelled')
-                raise
             except Exception as e:
-                logger_.info(f'drop. req error {repr(e)}')
+                logger_.info(f'drop reqt-ret-err. {repr(e)}')
 
         elif (reqt == _REQT_NOTIFY):
             pass
+
         else:
-            logger_.warning(f'_process {tag} unknown type {reqt}')
+            logger_.warning(f'req {tag} unknown type {reqt}')
+        logger_.debug(f'end _process {req}')
 
     chan_.cb(_process)
 
