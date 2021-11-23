@@ -7,7 +7,7 @@ from msgspec.core import decode, encode
 
 import arun
 
-import p_chan
+from .p_chan import chan
 
 
 _MAX_SERV_ID = (0x1 << 48)
@@ -22,7 +22,7 @@ def init(bus_name, self_name):
     call_ = {}
     serv_ = {}
     serv_tag_ = 0
-    chan_ = p_chan.chan(bus_name, self_name)
+    chan_ = chan(bus_name, self_name)
 
     def _gen_tag():
         nonlocal serv_tag_
