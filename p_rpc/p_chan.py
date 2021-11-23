@@ -16,7 +16,7 @@ def _cname(prefix, bus_name, peer_name):
 
 def _csock(cname):
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-    if (cname is not None):
+    if cname is not None:
         sock.bind(cname)
     sock.setblocking(False)
     return sock
@@ -49,11 +49,11 @@ def chan(bus_name, self_name):
     async def _serv_recv(sock, chans, peer_name):
         loop = arun.loop()
         try:
-            while (True):
+            while True:
                 msg = await loop.sock_recv(sock, MAX_MSG)
                 if len(msg) == 0:
                     break
-                if (msg_cb_ is not None):
+                if msg_cb_ is not None:
                     arun.post_in_task(msg_cb_(peer_name, msg))
         finally:
             chans.pop(peer_name, None)
@@ -63,10 +63,10 @@ def chan(bus_name, self_name):
         loop = arun.loop()
         try:
             peer_name = await loop.sock_recv(sock, MAX_MSG)
-            if (len(peer_name) == 0):
+            if len(peer_name) == 0:
                 raise Exception('sock shutdown')
             peer_name = peer_name.decode()
-            if (tchans_.get(peer_name, None) is not None):
+            if tchans_.get(peer_name, None) is not None:
                 raise Exception('chan already exit')
             tchans_[peer_name] = sock
             arun.post_in_task(_serv_recv(sock, tchans_, peer_name))
@@ -76,13 +76,13 @@ def chan(bus_name, self_name):
     async def _initiator_handshake(peer_name):
         idx = hash(peer_name) % LOCKS_NUM
         lock = ilocks_.get(idx, None)
-        if (lock is None):
+        if lock is None:
             lock = asyncio.Lock()
             ilocks_[idx] = lock
         loop = arun.loop()
         async with lock:
             sock = ichans_.get(peer_name, None)
-            if (sock is not None):
+            if sock is not None:
                 return sock
             sock = _tsock()
             try:
@@ -96,7 +96,7 @@ def chan(bus_name, self_name):
 
     async def _serv_accept():
         _laccept = partial(_caccept, sock_)
-        while (True):
+        while True:
             sock = await _laccept()
             arun.post_in_task(_target_handshake(sock))
 
@@ -105,11 +105,11 @@ def chan(bus_name, self_name):
     async def _enqueue(peer_name, msg):
         loop = arun.loop()
         sock = tchans_.get(peer_name, None)
-        if (sock is None):
+        if sock is None:
             sock = ichans_.get(peer_name, None)
-        if (sock is None):
+        if sock is None:
             sock = await _initiator_handshake(peer_name)
-        if (sock is None):
+        if sock is None:
             raise Exception(f'unreachable peer: {peer_name}')
         await loop.sock_sendall(sock, msg)
 

@@ -27,15 +27,15 @@ def init(bus_name, self_name):
     def _gen_tag():
         nonlocal serv_tag_
         serv_tag_ += 1
-        if (serv_tag_ == _MAX_SERV_ID):
+        if serv_tag_ == _MAX_SERV_ID:
             serv_tag_ = 0
         return serv_tag_
 
     def _reg_serv(serv_func, serv_name=None):
         assert(iscoroutinefunction(serv_func))
-        if (serv_name is None):
+        if serv_name is None:
             serv_name = serv_func.__name__
-        if (serv_.get(serv_name, None) is not None):
+        if serv_.get(serv_name, None) is not None:
             raise Exception(f'serv {serv_name} registered')
         serv_[serv_name] = serv_func
 
@@ -66,7 +66,7 @@ def init(bus_name, self_name):
             return
 
         logger_.debug(f'Starting _process {req}')
-        if (reqt == _REQT_CALL):
+        if reqt == _REQT_CALL:
             try:
                 serv_name, args, kwargs = rest
                 serv = serv_[serv_name]
@@ -82,7 +82,7 @@ def init(bus_name, self_name):
                 ret = encode(ret)
             await chan_.enqueue(peer_name, ret)
 
-        elif (reqt == _REQT_RET_DONE):
+        elif reqt == _REQT_RET_DONE:
             try:
                 res, = rest
                 wait_ret = call_.pop(tag, None)
@@ -91,7 +91,7 @@ def init(bus_name, self_name):
             except Exception as e:
                 logger_.info(f'drop reqt-ret-done. {repr(e)}')
 
-        elif (reqt == _REQT_RET_ERR):
+        elif reqt == _REQT_RET_ERR:
             try:
                 err, = rest
                 wait_ret = call_.pop(tag, None)
@@ -100,7 +100,7 @@ def init(bus_name, self_name):
             except Exception as e:
                 logger_.info(f'drop reqt-ret-err. {repr(e)}')
 
-        elif (reqt == _REQT_NOTIFY):
+        elif reqt == _REQT_NOTIFY:
             pass
 
         else:
