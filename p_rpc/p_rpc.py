@@ -85,18 +85,16 @@ def init(bus_name, self_name):
         elif reqt == _REQT_RET_DONE:
             try:
                 res, = rest
-                wait_ret = call_.pop(tag, None)
-                if wait_ret is not None:
-                    wait_ret.set_result(res)
+                wait_ret = call_.pop(tag)
+                wait_ret.set_result(res)
             except Exception as e:
                 logger_.info(f'drop reqt-ret-done. {repr(e)}')
 
         elif reqt == _REQT_RET_ERR:
             try:
                 err, = rest
-                wait_ret = call_.pop(tag, None)
-                if wait_ret is not None:
-                    wait_ret.set_exception(Exception(err))
+                wait_ret = call_.pop(tag)
+                wait_ret.set_exception(Exception(err))
             except Exception as e:
                 logger_.info(f'drop reqt-ret-err. {repr(e)}')
 

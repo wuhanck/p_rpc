@@ -56,7 +56,7 @@ def chan(bus_name, self_name):
                 if msg_cb_ is not None:
                     arun.post_in_task(msg_cb_(peer_name, msg))
         finally:
-            chans.pop(peer_name, None)
+            chans.pop(peer_name)
             sock.close()
 
     async def _target_handshake(sock):
