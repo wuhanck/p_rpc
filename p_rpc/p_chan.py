@@ -15,17 +15,17 @@ def _cname(prefix, bus_name, peer_name):
 
 
 def _csock(cname):
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET
+            |socket.SOCK_CLOEXEC
+            |socket.SOCK_NONBLOCK)
     if cname is not None:
         sock.bind(cname)
-    sock.setblocking(False)
     return sock
 
 
 async def _caccept(sock):
     loop = arun.loop()
     ret, _ = await loop.sock_accept(sock)
-    ret.setblocking(False)
     return ret
 
 
