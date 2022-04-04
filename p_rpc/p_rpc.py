@@ -3,7 +3,7 @@ import logging
 from asyncio import CancelledError, iscoroutinefunction
 import traceback
 
-from msgspec.core import decode, encode
+from msgspec.msgpack import decode, encode
 
 import arun
 
