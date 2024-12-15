@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="p_rpc",
-    version="1.0.4",
+    version="1.1.0",
     author="wuhanck",
     author_email="wuhanck@hotmail.com",
     description="peer2peer rpc",
@@ -12,5 +12,5 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.7',
+    python_requires='>=3.9',
 )

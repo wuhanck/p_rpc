@@ -17,12 +17,12 @@ _REQT_RET_ERR = 2
 _REQT_NOTIFY = -1
 
 
-def init(bus_name, self_name):
+def init(bus_name, self_name, prot=None):
     logger_ = logging.getLogger(f'{__name__}.{bus_name}.{self_name}')
     call_ = {}
     serv_ = {}
     serv_tag_ = 0
-    chan_ = chan(bus_name, self_name)
+    chan_ = chan(bus_name, self_name, prot)
 
     def _gen_tag():
         nonlocal serv_tag_
@@ -32,10 +32,10 @@ def init(bus_name, self_name):
         return serv_tag_
 
     def _reg_serv(serv_func, serv_name=None):
-        assert(iscoroutinefunction(serv_func))
+        assert iscoroutinefunction(serv_func)
         if serv_name is None:
             serv_name = serv_func.__name__
-        if serv_.get(serv_name, None) is not None:
+        if serv_.get(serv_name) is not None:
             raise Exception(f'serv {serv_name} registered')
         serv_[serv_name] = serv_func
 
@@ -53,7 +53,7 @@ def init(bus_name, self_name):
         finally:
             call_.pop(tag, None)
 
-    class inner_:
+    class inner:
         reg_serv = _reg_serv
         call = _call
 
@@ -70,7 +70,7 @@ def init(bus_name, self_name):
             try:
                 serv_name, args, kwargs = rest
                 serv = serv_[serv_name]
-                ret = await serv(inner_, peer_name, *args, **kwargs)
+                ret = await serv(inner, peer_name, *args, **kwargs)
                 ret = [_REQT_RET_DONE, tag, ret]
                 ret = encode(ret)
             except CancelledError:
@@ -107,10 +107,11 @@ def init(bus_name, self_name):
 
     chan_.cb(_process)
 
-    return inner_
+    return inner
 
 
 if __name__ == '__main__':
+
     async def serv1(chan, peer_name):
         print(f'chan:{chan} from: {peer_name}. serv1 called.')
         pass
@@ -127,7 +128,7 @@ if __name__ == '__main__':
 
     async def _test2_call_test1_serv1():
         ret = await peer2.call('test1', 'serv1')
-        print(f'_test2_call_test1_serv1 ret:{ret}')
+        print(f'_test2_call_test1_serv1 ret: {ret}')
         ret = await peer2.call('test1', 'serv2', 'my fault')
         print(f'exception happens. no print this {ret}')
 

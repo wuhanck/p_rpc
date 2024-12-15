@@ -5,6 +5,8 @@ from functools import partial
 
 import arun
 
+from .general_proto import gen_connected_msg_sock, gen_listened_sock
+
 
 def _abs_uds_name(bus_name, peer_name): # abstract name (need to used by abs uds)
     return '\0'+bus_name+'\0'+peer_name
@@ -12,61 +14,26 @@ def _abs_uds_name(bus_name, peer_name): # abstract name (need to used by abs uds
 
 def _connected_sock(sock):
     FRAME_SIZE = 128*1024
-    slock_ = asyncio.Lock()
+    loop = arun.loop()
 
-    async def _send(msg):
-        loop = arun.loop()
-        start, end = 0, len(msg)
-        if end == 0: return
-        hdr = end.to_bytes(4, 'big')
-        async with slock_:
-            await loop.sock_sendall(sock, hdr)
-            while start < end:
-                await loop.sock_sendall(sock, msg[start : start+FRAME_SIZE])
-                start += FRAME_SIZE
-
-    async def _recv():
-        loop = arun.loop()
-        hdr = await loop.sock_recv(sock, FRAME_SIZE)
-        if len(hdr) == 0: return hdr
-        assert len(hdr) == 4, f'header len 4 {len(hdr)}'
-        start, end = 0, int.from_bytes(hdr, 'big')
-        assert end != 0, f'recv zero-length msg'
-        ret = []
-        while start < end:
-            fm = await loop.sock_recv(sock, FRAME_SIZE)
-            start += len(fm)
-            ret.append(fm)
-        ret = b''.join(ret)
-        assert len(ret) == end, f'content len {end} {len(ret)}'
-        return ret
-
-    def _close():
-        sock.close()
-
-    class inner:
-        send = _send
-        recv = _recv
-        close = _close
-    return inner
+    send = partial(loop.sock_sendall, sock)
+    recv = partial(loop.sock_recv, sock, FRAME_SIZE)
+    return gen_connected_msg_sock(send, recv, sock.close, FRAME_SIZE)
 
 
 def _listened_sock(sock):
+
     async def _accept():
         loop = arun.loop()
         ret, _ = await loop.sock_accept(sock)
         return _connected_sock(ret)
 
-    def _close():
-        sock.close()
+    def _close(): sock.close()
 
-    class inner:
-        accept = _accept
-        close = _close
-    return inner
+    return gen_listened_sock(_accept, _close)
 
 
-async def tsock(bus_name, peer_name):
+async def _tsock(bus_name, peer_name):
     cname = _abs_uds_name(bus_name, peer_name)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET
             |socket.SOCK_CLOEXEC
@@ -82,7 +49,7 @@ async def tsock(bus_name, peer_name):
     return _connected_sock(sock)
 
 
-def lsock(bus_name, self_name):
+def _lsock(bus_name, self_name):
     cname = _abs_uds_name(bus_name, self_name)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET
             |socket.SOCK_CLOEXEC
@@ -98,7 +65,12 @@ def lsock(bus_name, self_name):
     return _listened_sock(sock)
 
 
-def chan(bus_name, self_name):
+def chan(bus_name, self_name, prot=None):
+    if prot is None:
+        lsock, tsock = _lsock, _tsock
+    else:
+        lsock, tsock = prot.lsock, prot.tsock
+
     sock_ = lsock(bus_name, self_name)
     ichans_ = {}
     tchans_ = {}
@@ -127,7 +99,7 @@ def chan(bus_name, self_name):
             if len(peer_name) == 0:
                 raise Exception('sock shutdown')
             peer_name = peer_name.decode()
-            if tchans_.get(peer_name, None) is not None:
+            if tchans_.get(peer_name) is not None:
                 raise Exception('chan already exit')
             tchans_[peer_name] = sock
             arun.post_in_task(_serv_recv(sock, tchans_, peer_name))
@@ -135,10 +107,11 @@ def chan(bus_name, self_name):
             sock.close()
 
     async def _initiator_handshake(peer_name):
+        sock = None
         try:
             sock = await tsock(bus_name, peer_name)
             await sock.send(self_name.encode())
-            other_sock = ichans_.get(peer_name, None)
+            other_sock = ichans_.get(peer_name)
             if other_sock is None:
                 ichans_[peer_name] = sock
                 arun.post_in_task(_serv_recv(sock, ichans_, peer_name))
@@ -157,9 +130,9 @@ def chan(bus_name, self_name):
     arun.append_task(_serv_accept())
 
     async def _enqueue(peer_name, msg):
-        sock = tchans_.get(peer_name, None)
+        sock = tchans_.get(peer_name)
         if sock is None:
-            sock = ichans_.get(peer_name, None)
+            sock = ichans_.get(peer_name)
         if sock is None:
             sock = await _initiator_handshake(peer_name)
         if sock is None:
@@ -169,7 +142,6 @@ def chan(bus_name, self_name):
     class inner:
         cb = _cb
         enqueue = _enqueue
-
     return inner
 
 
