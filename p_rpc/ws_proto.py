@@ -60,8 +60,10 @@ def ws_t_proto(base_uri):
         sock = _connected_ws(ws, fut)
 
         async def close():
-            await fut
-            await ws.close()
+            try:
+                await fut
+            finally:
+                await ws.close()
         arun.post_in_task(close())
         return sock
 
