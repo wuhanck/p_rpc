@@ -17,9 +17,9 @@ def _ws_path(bus_name, peer_name):
 def _connected_ws(sock, fut):
     FRAME_SIZE = 8*1024
 
-    def _close(): fut.set_result('close')
+    close_ = partial(fut.set_result, 'close')
 
-    return gen_connected_msg_sock(sock.send, sock.recv, _close, FRAME_SIZE)
+    return gen_connected_msg_sock(sock.send, sock.recv, close_, FRAME_SIZE)
 
 
 def ws_l_proto(host, port):

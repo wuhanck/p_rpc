@@ -6,6 +6,7 @@ import arun
 
 def gen_connected_msg_sock(send, recv, close, FRAME_SIZE):
     slock_ = asyncio.Lock()
+    rlock_ = asyncio.Lock()
 
     async def _send(msg):
         start, end = 0, len(msg)
@@ -18,16 +19,17 @@ def gen_connected_msg_sock(send, recv, close, FRAME_SIZE):
                 start += FRAME_SIZE
 
     async def _recv():
-        hdr = await recv()
-        if len(hdr) == 0: return hdr
-        assert len(hdr) == 4, f'header len 4 {len(hdr)}'
-        start, end = 0, int.from_bytes(hdr, 'big')
-        assert end != 0, f'recv zero-length msg'
-        ret = []
-        while start < end:
-            fm = await recv()
-            start += len(fm)
-            ret.append(fm)
+        async with rlock_:
+            hdr = await recv()
+            if len(hdr) == 0: return hdr
+            assert len(hdr) == 4, f'header len 4 {len(hdr)}'
+            start, end = 0, int.from_bytes(hdr, 'big')
+            assert end != 0, f'recv zero-length msg'
+            ret = []
+            while start < end:
+                fm = await recv()
+                start += len(fm)
+                ret.append(fm)
         ret = b''.join(ret)
         assert len(ret) == end, f'content len {end} {len(ret)}'
         return ret
@@ -46,8 +48,7 @@ def gen_connected_msg_sock(send, recv, close, FRAME_SIZE):
 
 
 def gen_listened_sock(accept, close):
-
-    async def _accept(): return await accept()
+    accept_ = accept
 
     def _close():
         try:
@@ -56,7 +57,7 @@ def gen_listened_sock(accept, close):
             pass
 
     class inner:
-        accept = _accept
+        accept = accept_
         close = _close
     return inner
 
@@ -75,18 +76,16 @@ async def _null_tsock(bus_name, peer_name):
 
 
 def gen_proto(lsock=_null_lsock, tsock=_null_tsock):
-
-    def _lsock(bus_name, self_name): return lsock(bus_name, self_name)
-
-    async def _tsock(bus_name, peer_name): return await tsock(bus_name, peer_name)
+    lsock_ = lsock
+    tsock_ = tsock
 
     class inner:
-        lsock = _lsock
-        tsock = _tsock
+        lsock = lsock_
+        tsock = tsock_
     return inner
 
 
 if __name__ == '__main__':
-    s = null_lsock('test', 'test')
+    s = _null_lsock('test', 'test')
     arun.append_task(s.accept())
     arun.run()

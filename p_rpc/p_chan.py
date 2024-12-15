@@ -28,9 +28,7 @@ def _listened_sock(sock):
         ret, _ = await loop.sock_accept(sock)
         return _connected_sock(ret)
 
-    def _close(): sock.close()
-
-    return gen_listened_sock(_accept, _close)
+    return gen_listened_sock(_accept, sock.close)
 
 
 async def _tsock(bus_name, peer_name):
