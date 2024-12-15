@@ -23,7 +23,7 @@ def _connected_ws(sock, fut):
 
 
 def ws_l_proto(host, port):
-    aqs_ = {}  # map fo accept queues
+    aqs_ = {}  # map for accept queues
 
     async def _ws_handler(ws):
         path = ws.request.path
