@@ -32,7 +32,11 @@ def gen_connected_msg_sock(send, recv, close, FRAME_SIZE):
         assert len(ret) == end, f'content len {end} {len(ret)}'
         return ret
 
-    def _close(): close()
+    def _close():
+        try:
+            close()
+        except Exception:
+            pass
 
     class inner:
         send = _send
@@ -45,7 +49,11 @@ def gen_listened_sock(accept, close):
 
     async def _accept(): return await accept()
 
-    def _close(): close()
+    def _close():
+        try:
+            close()
+        except Exception:
+            pass
 
     class inner:
         accept = _accept
