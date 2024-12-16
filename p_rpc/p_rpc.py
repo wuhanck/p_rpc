@@ -2,6 +2,8 @@
 import logging
 from asyncio import CancelledError, iscoroutinefunction
 import traceback
+import secrets
+import random
 
 from msgspec.msgpack import decode, encode
 
@@ -15,13 +17,14 @@ _REQT_CALL = 0
 _REQT_RET_DONE = 1
 _REQT_RET_ERR = 2
 _REQT_NOTIFY = -1
+_SECRET_SESS = secrets.token_bytes(nbytes=10)
 
 
 def init(bus_name, self_name, prot=None):
     logger_ = logging.getLogger(f'{__name__}.{bus_name}.{self_name}')
     call_ = {}
     serv_ = {}
-    serv_tag_ = 0
+    serv_tag_ = random.randint(0, (1<<48)-1)
     chan_ = chan(bus_name, self_name, prot)
 
     def _gen_tag():
@@ -29,7 +32,7 @@ def init(bus_name, self_name, prot=None):
         serv_tag_ += 1
         if serv_tag_ == _MAX_SERV_ID:
             serv_tag_ = 0
-        return serv_tag_
+        return b''.join([_SECRET_SESS, serv_tag_.to_bytes(6)])
 
     def _reg_serv(serv_func, serv_name=None):
         assert iscoroutinefunction(serv_func)
