@@ -63,10 +63,15 @@ def gen_listened_sock(accept, close):
 
 
 def _null_lsock(bus_name, self_name):
+    fut_ = None
 
-    async def _accept(): await arun.future()
+    async def _accept():
+        nonlocal fut_
+        fut_ = arun.future()
+        await fut_
 
-    def _close(): pass
+    def _close():
+        if fut_ is not None: fut_.set_result('close')
 
     return gen_listened_sock(_accept, _close)
 
@@ -87,5 +92,10 @@ def gen_proto(lsock=_null_lsock, tsock=_null_tsock):
 
 if __name__ == '__main__':
     s = _null_lsock('test', 'test')
-    arun.append_task(s.accept())
+
+    async def test_close():
+        await arun.sleep(5)
+        s.close()
+
+    arun.append_task(s.accept(), test_close())
     arun.run()

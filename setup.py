@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="p_rpc",
-    version="1.1.0",
+    version="1.1.1",
     author="wuhanck",
     author_email="wuhanck@hotmail.com",
     description="peer2peer rpc",
